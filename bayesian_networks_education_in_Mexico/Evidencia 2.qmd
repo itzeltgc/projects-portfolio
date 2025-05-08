@@ -1,0 +1,224 @@
+---
+title: "Evidencia 2"
+author: "Itzelt Gómez"
+format:
+   html:
+     toc: true
+     html-math-method: katex
+     embed-resources: true
+     self-contained-math: true
+     df-print: kable
+editor: visual
+---
+
+# Librerias
+
+```{r}
+library(tidyverse)
+library(bnlearn)
+library(ggplot2)
+library(lubridate)
+library(readr)
+library(dplyr)
+library(mgcv)
+library(gratia)
+library(arrow)
+library(dplyr)
+library(igraph)
+```
+
+# Carga de Datos
+
+```{r}
+sanrio = read_csv("ADNI.csv")
+```
+
+```{r}
+colnames(sanrio)
+```
+
+# Limpieza
+
+## Selección de variables
+
+```{r}
+sanrio <-  sanrio |>
+  select(APOE4, ABETA, PTAU, MMSE, ADAS11, CDRSB, RAVLT_forgetting, AGE, PTEDUCAT, Hippocampus, WholeBrain)
+
+sanrio
+```
+
+## Variables con valores nulos
+
+### eliminar valores nulos del db (ya no)
+
+```{r}
+sanrio <- sanrio |>
+  filter(!is.na(PTAU) & !is.na(ABETA) & !is.na(ADAS11) & !is.na(CDRSB) & !is.na(RAVLT_forgetting) & !is.na(MMSE) & !is.na(Hippocampus) & !is.na(WholeBrain)) 
+sanrio
+```
+
+### checamos cuántos valores nulos tienen las variables
+
+```{r}
+#columnas que tienen valores nulos
+columnas_NA <- names(sanrio)[sapply(sanrio, function(x) any (is.na(x)))]
+columnas_NA
+
+#CONTEO DE LOS VALORES NULOS
+conteo_NA <- sapply(sanrio, function(x) sum(is.na(x)))
+conteo_NA
+```
+
+```{r}
+colnames(sanrio)
+```
+
+## Cambiamos de nombres a las columnas para que sean las de nuestras DAGS
+
+```{r}
+colnames(sanrio) <- c("APOE4", "ABETA", "PTAU", "MMSE","ADAS11", "CDRSB", "RAVLT_F", "A", "E", "H", "WB")
+sanrio
+```
+
+```{r}
+colnames(sanrio)
+```
+
+### Checamos el tipo de dato, para cambiarlo a numerico
+
+```{r}
+str(sanrio)
+```
+
+```{r}
+sanrio <- sanrio |>
+  mutate(across(where(is.character), as.numeric)) 
+
+str(sanrio)
+```
+
+```{r}
+#COLUMNAS QUE TIENEN VALORES NULOS
+columnas_NA <- names(sanrio)[sapply(sanrio, function(x) any (is.na(x)))]
+columnas_NA
+
+#CONTEO DE LOS VALORES NULOS
+conteo_NA <- sapply(sanrio, function(x) sum(is.na(x)))
+conteo_NA
+
+sanrio <- sanrio |>
+  filter(!is.na(ABETA) & !is.na(PTAU))
+
+
+```
+
+# DAGS
+
+```{r}
+
+dag1 = model2network("[A][E][APOE4][ABETA|A][PTAU|A][RAVLT_F|A:E][CDRSB|E:APOE4][ADAS11|APOE4][H|ABETA:PTAU:ADAS11][WB|ABETA:ADAS11:RAVLT_F:CDRSB][MMSE|H:WB]")
+
+dag2 = model2network("[A][APOE4][E][PTAU|A][ABETA|A][RAVLT_F|A][ADAS11|APOE4][CDRSB|A:APOE4:E][H|PTAU:ABETA:ADAS11:E][WB|PTAU:ABETA:ADAS11:RAVLT_F:CDRSB][MMSE|H:WB]")
+
+dag3 = model2network("[A][APOE4][E][PTAU][ADAS11][ABETA|E][RAVLT_F|A:E][CDRSB|A:E][H|PTAU:ABETA][WB|ABETA:ADAS11:APOE4][MMSE|H:WB:RAVLT_F:CDRSB]")
+
+```
+
+# Modelo Lineal
+
+## Ajustamos el Modelo (linear GBN)
+
+```{r}
+
+sanrio_fit1 = bn.fit(dag1, data = sanrio)
+sanrio_fit2 = bn.fit(dag2, data = sanrio)
+sanrio_fit3 = bn.fit(dag3, data = sanrio)
+
+```
+
+## GraficaS DAGS
+
+### DAG1
+
+```{r}
+graphviz.plot(dag1, shape = 'ellipse')
+
+```
+
+### DAG2
+
+```{r}
+graphviz.plot(dag2, shape= "ellipse")
+```
+
+### DAG3
+
+```{r}
+graphviz.plot(dag3, shape = "circle")
+```
+
+## BICs
+
+score 1
+
+```{r}
+score(dag1, data = sanrio, type= 'bic-g')
+
+```
+
+score 2
+
+```{r}
+score(dag2, data = sanrio, type = "bic-g")
+
+```
+
+score 3
+
+```{r}
+score(dag3, data = sanrio, type = "bic-g")
+```
+
+## AIC
+
+score 1
+
+```{r}
+score(dag1, data= sanrio, type = 'aic-g')
+
+```
+
+score 2
+
+```{r}
+score(dag2, data = sanrio, type = "aic-g")
+```
+
+score 3
+
+```{r}
+score(dag3, data = sanrio, type = "aic-g")
+```
+
+# Queries
+
+## Q1: ¿Qué tan probable es que una persona desarrolle Alzheimer si su nivel educativo es menor o igual a 12 años?
+
+```{r}
+cpquery(sanrio_fit3, event= MMSE <= 15, evidence = E <= 12, n = 10e6)
+```
+
+calcula también el complemento
+
+## Q2: ¿Cuál es la probabilidad de que un paciente desarrolle Alzheimer dada la presencia de una anomalía en el biomarcador APOE4 o que presente reducción en la corteza y volumen cerebral?
+
+```{r}
+cpquery(sanrio_fit3, event = (MMSE <= 20) & ((A >= 54) & (A <= 67)), evidence = (APOE4 == 1) | (WB < 947663), n = 10e6)
+```
+
+## Q3: ¿Cuál es la probabilidad de que una persona muestre atrofia en el hipocampo dado que muestra niveles altos de proteina Tau?
+
+```{r}
+cpquery(sanrio_fit3, event = PTAU >= 60, evidence = H <= 5956, n = 10e6)
+```
